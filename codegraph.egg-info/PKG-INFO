@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: codegraph
+Version: 0.1.0
+Summary: Structural code intelligence for AI agents
+Requires-Python: >=3.11
+Requires-Dist: tree-sitter>=0.23
+Requires-Dist: tree-sitter-python>=0.23
+Requires-Dist: tree-sitter-typescript>=0.23
+Requires-Dist: networkx>=3.0
+Requires-Dist: mcp[cli]>=1.0

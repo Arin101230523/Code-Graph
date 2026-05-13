@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codegraph"
+version = "0.1.0"
+description = "Structural code intelligence for AI agents"
+requires-python = ">=3.11"
+dependencies = [
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-typescript>=0.23",
+    "networkx>=3.0",
+    "mcp[cli]>=1.0",
+]
+
+[project.scripts]
+codegraph = "codegraph.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codegraph*"]
