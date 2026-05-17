@@ -2,6 +2,7 @@ pyproject.toml
 codegraph/__init__.py
 codegraph/__main__.py
 codegraph/cli.py
+codegraph/viz.py
 codegraph.egg-info/PKG-INFO
 codegraph.egg-info/SOURCES.txt
 codegraph.egg-info/dependency_links.txt

@@ -193,6 +193,124 @@ class GraphStore:
             files[fp]["total"] += 1
         return sorted(files.values(), key=lambda x: x["filepath"])
 
+    def impact_analysis(self, name: str, max_depth: int = 5) -> dict:
+        """
+        Given a function name, find everything that would be affected if it changed.
+        Traverses the call graph in reverse (who calls this, who calls those, etc.)
+        Returns a tree of affected nodes grouped by depth level.
+        """
+        targets = {r["id"] for r in self.find_definition(name)
+                   if r["kind"] in ("function", "class")}
+        # also match bare unresolved names in edges
+        bare_targets = {name}  # for matching unresolved dst strings
+        if not targets:
+            return {"error": f"No function or class found matching '{name}'"}
+
+        # Build reverse graph for upstream traversal
+        reverse_G = self.G.reverse(copy=False)
+
+        visited: set[str] = set(targets)
+        levels: list[list[dict]] = []
+
+        current_frontier = targets
+        for depth in range(max_depth):
+            next_frontier: set[str] = set()
+            level_nodes: list[dict] = []
+
+            for node_id in current_frontier:
+                for src_id, _, data in self.G.in_edges(node_id, data=True):
+                    if data.get("kind") != "calls":
+                        continue
+                    if src_id in visited:
+                        continue
+                    visited.add(src_id)
+                    next_frontier.add(src_id)
+                    caller_data = self.G.nodes.get(src_id, {})
+                    level_nodes.append({
+                        "id":         src_id,
+                        "name":       caller_data.get("name", src_id),
+                        "kind":       caller_data.get("kind", "unknown"),
+                        "filepath":   caller_data.get("filepath", "?"),
+                        "start_line": caller_data.get("start_line"),
+                        "end_line":   caller_data.get("end_line"),
+                    })
+
+            # also scan all edges for bare-name matches on first pass
+            if depth == 0:
+                for src_id, dst, data in self.G.edges(data=True):
+                    if data.get("kind") != "calls":
+                        continue
+                    if dst not in bare_targets:
+                        continue
+                    if src_id in visited:
+                        continue
+                    visited.add(src_id)
+                    next_frontier.add(src_id)
+                    caller_data = self.G.nodes.get(src_id, {})
+                    level_nodes.append({
+                        "id": src_id,
+                        "name": caller_data.get("name", src_id),
+                        "kind": caller_data.get("kind", "unknown"),
+                        "filepath": caller_data.get("filepath", "?"),
+                        "start_line": caller_data.get("start_line"),
+                        "end_line": caller_data.get("end_line"),
+                    })
+
+            if not level_nodes:
+                break
+            levels.append(level_nodes)
+            current_frontier = next_frontier
+
+        # flatten for summary
+        all_affected = [n for level in levels for n in level]
+        files_affected = len({n["filepath"] for n in all_affected})
+
+        return {
+            "target": name,
+            "total_affected": len(all_affected),
+            "files_affected": files_affected,
+            "depth_reached": len(levels),
+            "by_depth": levels,
+        }
+
+    def graph_export(self, filepath_filter: str = "") -> dict:
+        """
+        Export the graph as JSON for visualization.
+        Optionally filter to nodes in files matching filepath_filter.
+        Returns {nodes: [...], edges: [...]} suitable for D3.js.
+        """
+        nodes = []
+        node_ids: set[str] = set()
+
+        for node_id, data in self.G.nodes(data=True):
+            fp = data.get("filepath", "")
+            if filepath_filter and filepath_filter not in fp:
+                continue
+            # skip bare unresolved names (no "::" means it's a raw callee name)
+            if "::" not in node_id:
+                continue
+            node_ids.add(node_id)
+            nodes.append({
+                "id": node_id,
+                "name": data.get("name", node_id),
+                "kind": data.get("kind", "unknown"),
+                "filepath": fp,
+                "start_line": data.get("start_line"),
+                "end_line": data.get("end_line"),
+            })
+
+        edges = []
+        for src, dst, data in self.G.edges(data=True):
+            if src not in node_ids or dst not in node_ids:
+                continue
+            edges.append({
+                "source": src,
+                "target": dst,
+                "kind": data.get("kind", "unknown"),
+            })
+
+        return {"nodes": nodes, "edges": edges}
+
     def stats(self) -> dict:
         nodes = self.G.number_of_nodes()
         edges = self.G.number_of_edges()

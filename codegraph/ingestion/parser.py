@@ -7,12 +7,9 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Literal
 
-try:
-    import tree_sitter_python as tspython
-    import tree_sitter_typescript as tstypescript
-    from tree_sitter import Language, Parser, Node
-except ImportError as e:
-    raise ImportError("Run: pip install tree-sitter tree-sitter-python tree-sitter-typescript") from e
+import tree_sitter_python as tspython
+import tree_sitter_typescript as tstypescript
+from tree_sitter import Language, Parser, Node
 
 NodeKind = Literal["function", "class", "module"]
 EdgeKind = Literal["calls", "imports", "contains"]

@@ -215,6 +215,39 @@ def create_app(store: GraphStore, repo_path: str = "") -> FastMCP:
             f"  Message: {info['last_message']}"
         )
 
+    @mcp.tool()
+    def impact_analysis(name: str, max_depth: int = 4) -> str:
+        """
+        Find everything that would break if you changed a function or class.
+        Traverses the call graph in reverse to find all upstream callers, recursively.
+        Essential before refactoring — shows the full blast radius of a change.
+        name:      the function or class you're about to change
+        max_depth: how many levels up to traverse (default 4)
+        """
+        result = store.impact_analysis(name, max_depth=max_depth)
+        if "error" in result:
+            return result["error"]
+
+        lines = [
+            f"Impact analysis for '{result['target']}':",
+            f"  {result['total_affected']} function(s) affected across "
+            f"{result['files_affected']} file(s) "
+            f"(traversed {result['depth_reached']} level(s))\n",
+        ]
+
+        for i, level in enumerate(result["by_depth"], 1):
+            lines.append(f"Level {i} — direct {'callers' if i == 1 else 'transitive callers'} ({len(level)}):")
+            for n in level[:15]:  # cap display at 15 per level
+                lines.append(
+                    f"  [{n['kind']}] {n['name']}"
+                    f"  {n['filepath']}:{n['start_line']}"
+                )
+            if len(level) > 15:
+                lines.append(f"  ... and {len(level) - 15} more")
+            lines.append("")
+
+        return "\n".join(lines)
+
     return mcp
 
 # Entry 
