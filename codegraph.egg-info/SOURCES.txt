@@ -11,6 +11,7 @@ codegraph.egg-info/top_level.txt
 codegraph/graph/__init__.py
 codegraph/graph/store.py
 codegraph/ingestion/__init__.py
+codegraph/ingestion/git_reader.py
 codegraph/ingestion/parser.py
 codegraph/mcp/__init__.py
 codegraph/mcp/server.py

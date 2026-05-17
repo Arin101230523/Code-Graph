@@ -20,6 +20,10 @@ from mcp.server.fastmcp import FastMCP
 
 from codegraph.ingestion.parser import parse_repo
 from codegraph.graph.store import GraphStore
+from codegraph.ingestion.git_reader import (
+    get_file_history, get_function_blame,
+    get_recent_changes, get_recently_changed_files,
+)
 
 
 # Bootstrap: parse or load from cache
@@ -40,8 +44,9 @@ def build_store(repo_path: str, db_path: str, force: bool = False) -> GraphStore
 
 
 # MCP app
-def create_app(store: GraphStore) -> FastMCP:
+def create_app(store: GraphStore, repo_path: str = "") -> FastMCP:
     mcp = FastMCP("codegraph")
+    _repo = Path(repo_path).resolve() if repo_path else None
 
     @mcp.tool()
     def find_definition(name: str) -> str:
@@ -114,8 +119,103 @@ def create_app(store: GraphStore) -> FastMCP:
             )
         return "\n".join(lines)
 
-    return mcp
+    @mcp.tool()
+    def read_file(filepath: str, start_line: int = 1, end_line: int = 80) -> str:
+        """
+        Read the actual source code of a file in the indexed repo.
+        Use find_definition first to get the filepath and line numbers, then call this.
+        filepath:   relative path from the repo root (as returned by find_definition)
+        start_line: line to start reading from (1-indexed, default 1)
+        end_line:   line to stop reading at (default 80 — increase for longer functions)
+        """
+        if not _repo:
+            return "No repo path configured on this server."
 
+        full_path = _repo / filepath
+        if not full_path.exists():
+            return f"File not found: {filepath}"
+        if not full_path.resolve().is_relative_to(_repo):
+            return "Access denied: path outside repo."
+
+        try:
+            all_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            total     = len(all_lines)
+            s = max(1, start_line) - 1
+            e = min(total, end_line)
+            selected  = all_lines[s:e]
+            header    = f"// {filepath}  lines {s+1}–{e} of {total}\n"
+            numbered  = "\n".join(f"{s+1+i:4d}  {line}" for i, line in enumerate(selected))
+            return header + numbered
+        except Exception as exc:
+            return f"Error reading {filepath}: {exc}"
+
+    @mcp.tool()
+    def recent_changes(days: int = 14) -> str:
+        """
+        Show files and commits changed recently in the repo.
+        Useful for understanding what's been actively worked on.
+        days: how many days back to look (default 14)
+        """
+        if not _repo:
+            return "No repo path configured."
+        files = get_recently_changed_files(str(_repo), days=days)
+        commits = get_recent_changes(str(_repo), max_commits=10)
+        if not files and not commits:
+            return "No git history found (is this a git repo?)"
+
+        lines = [f"Recent activity (last {days} days):\n"]
+        lines.append(f"Files changed ({len(files)}):")
+        for f in files[:15]:
+            lines.append(f"  {f['filepath']}  ({f['days_ago']}d ago by {f['last_author']})")
+            lines.append(f"    {f['last_message']}")
+
+        lines.append(f"\nRecent commits:")
+        for c in commits:
+            lines.append(f"  [{c['sha']}] {c['date']}  {c['author']}")
+            lines.append(f"    {c['message']}")
+
+        return "\n".join(lines)
+
+    @mcp.tool()
+    def file_history(filepath: str) -> str:
+        """
+        Show the git commit history for a specific file.
+        filepath: relative path from repo root (as returned by find_definition)
+        """
+        if not _repo:
+            return "No repo path configured."
+        commits = get_file_history(str(_repo), filepath, max_commits=8)
+        if not commits:
+            return f"No git history found for {filepath}"
+        lines = [f"Git history for {filepath}:\n"]
+        for c in commits:
+            lines.append(f"  [{c['sha']}] {c['date']}  {c['author']}  ({c['days_ago']}d ago)")
+            lines.append(f"    {c['message']}")
+        return "\n".join(lines)
+
+    @mcp.tool()
+    def who_changed(filepath: str, start_line: int = 1, end_line: int = 50) -> str:
+        """
+        Show who last changed a specific function or file region using git blame.
+        Use find_definition to get the filepath and line numbers first.
+        filepath:   relative path from repo root
+        start_line: start of the function (from find_definition)
+        end_line:   end of the function (from find_definition)
+        """
+        if not _repo:
+            return "No repo path configured."
+        info = get_function_blame(str(_repo), filepath, start_line, end_line)
+        if not info:
+            return f"No blame info found for {filepath}:{start_line}-{end_line}"
+        return (
+            f"Last change to {filepath} lines {start_line}-{end_line}:\n"
+            f"  Author:  {info['last_author']}\n"
+            f"  Date:    {info['last_date']} ({info['days_since_change']} days ago)\n"
+            f"  Commit:  {info['last_commit']}\n"
+            f"  Message: {info['last_message']}"
+        )
+
+    return mcp
 
 # Entry 
 def main():
@@ -126,7 +226,7 @@ def main():
     args = parser.parse_args()
 
     store = build_store(args.repo, args.db, force=args.force)
-    app   = create_app(store)
+    app = create_app(store, repo_path=args.repo)
     app.run()
 
 
